@@ -5,11 +5,11 @@
 # Import site-package libraries
 import os
 import tensorflow as tf
+import time
 
 class BasicModel():
 
-    def __init__(self, config, train_input_encoder, train_input_decoder,
-                test_input_encoder, test_input_decoder):
+    def __init__(self, config):
         """
         This is the initialization, it is done for every model.
         It initializes all the parameters needed for training the neural network.
@@ -19,45 +19,30 @@ class BasicModel():
         self.config = config
         self.model_name = config.model_name
         self.out_dir = config.output_dir
-        self.lr = self.config.lr
+        if not os.path.exists(self.out_dir):
+            os.makedirs(self.out_dir)
+        self.learning_rate_decay_factor = config.decay_learning_rate
+        self.learning_rate_init = config.lr
+        self.lr_decay_sample_size = config.lr_decay_sample_size
         self.rnn_size = config.rnn_size
         self.batch_size = config.batch_size
         self.embedding_dim = config.embedding_dim
         self.vocab_size = config.vocab_size
+        self.beam_width = config.beam_width
         self.debug = config.debug
         self.grad_clip = config.grad_clip
+        self.dropout_keep_prob = config.dropout_keep_prob
         self.allow_soft_placement = config.allow_soft_placement
         self.log_device_placement = config.log_device_placement
-        self.num_checkpoint = config.log_device_placement
-        self.num_epoch = config.n_epochs
-        self.max_seq_length = config.max_seq_length
+        self.summary_every = config.summary_every
+        self.save_every = config.save_every
+        self.evaluate_every = config.evaluate_every
+        self.train_summary_dir = os.path.join(self.out_dir, "summaries", "train")
+        self.eval_summary_dir = os.path.join(self.out_dir, "summaries", "eval")
+        self.n_checkpoints_to_keep = config.n_checkpoints_to_keep
 
-        # Define graph and setup main parameters
-        self.graph = tf.Graph()
-        with self.graph.as_default():
-            session_conf = tf.ConfigProto(
-                allow_soft_placement=self.allow_soft_placement,
-                log_device_placement=self.log_device_placement,
-            )
-            self.session = tf.Session(config=session_conf)
-            with self.session.as_default():
-                with tf.device('/gpu:0'):
-                    # Setup training data
-                    self.labels_train = train_input_decoder[1]
-                    self.encoder_data_train = train_input_encoder[0]
-                    self.decoder_data_train = train_input_decoder[0]
-                    self.encoder_length_train = train_input_encoder[2]
-                    self.decoder_length_train = train_input_decoder[2]
-
-                    # Setup test data
-                    self.labels_test = test_input_decoder[1]
-                    self.encoder_data_test = test_input_encoder[0]
-                    self.decoder_data_test = test_input_decoder[0]
-                    self.encoder_length_test = test_input_encoder[2]
-                    self.decoder_length_test = test_input_decoder[2]
-
-                    # Builds the graph and session
-                    self._build_graph()
+        # Builds the graph and session
+        self.graph, self.session = self._build_graph(tf.Graph())
 
     def _build_graph(self, graph):
         """
@@ -72,7 +57,7 @@ class BasicModel():
 
         Example:
         with graph.as_default():
-            input_x = tf.placeholder(tf.int64, [64,100]) 
+            input_x = tf.placeholder(tf.int64, [64,100])
             input_y = tf.placeholder(tf.int64, [64,1])
             with tf.variable_scope('rnn'):
                 W = tf.Variable(
@@ -92,44 +77,6 @@ class BasicModel():
         """
 
         raise Exception('Needs to be implemented')
-
-    def _build_summary(self):
-        """
-        Returns a summary operation that summarizes data / variables during training.
-
-        The summary_op should be defined here and should be run after
-        `self._build_graph()` is called.
-
-        `self._make_summary_op()` will be called automatically in the
-        `self.__init__`-method.
-
-        Here's an example implementation:
-
-        with self.graph.as_default():
-            tf.summary.scalar('loss_summary', tf.get_variable('loss'))
-            tf.summary.scalar('learning_rate', tf.get_variable('lr'))
-            # ... add more summaries...
-
-            # merge all summaries generated and return the summary_op
-            return tf.summary.merge_all()
-
-
-        ... at a later point, the actual summary is stored like this:
-        self.summarize() and it is typically called in `self.learn_from_epoch`.
-        """
-        # Summaries for loss and accuracy
-        loss_summary = tf.summary.scalar("loss", self.loss)
-        acc_summary = tf.summary.scalar("accuracy", self.accuracy)
-
-        # Train Summaries
-        self.train_summary_op = tf.summary.merge([loss_summary, acc_summary])
-        train_summary_dir = os.path.join(self.out_dir, "summaries", "train")
-        self.train_summary_writer = tf.summary.FileWriter(train_summary_dir, self.session.graph)
-
-        # Dev summaries
-        self.dev_summary_op = tf.summary.merge([loss_summary, acc_summary])
-        dev_summary_dir = os.path.join(self.out_dir, "summaries", "dev")
-        self.dev_summary_writer = tf.summary.FileWriter(dev_summary_dir, self.session.graph)
 
     def infer(self):
         """
@@ -157,7 +104,7 @@ class BasicModel():
 
         raise Exception('Needs to be implemented')
 
-    def _save(self):
+    def save(self):
         """
         This is the model save-function. It is intended to be used within
         `self.learn_from_epoch`, but may of course be used anywhere else.
@@ -165,10 +112,10 @@ class BasicModel():
         """
         # Checkpoint directory (Tensorflow assumes this directory already exists so we need to create it)
         checkpoint_dir = os.path.abspath(os.path.join(self.out_dir, "checkpoints"))
-        self.checkpoint_prefix = os.path.join(checkpoint_dir, "model")
+        checkpoint_prefix = os.path.join(checkpoint_dir, "model")
         if not os.path.exists(checkpoint_dir):
             os.makedirs(checkpoint_dir)
-        self.saver = tf.train.Saver(tf.global_variables(), max_to_keep=self.num_checkpoint)
+        saver = tf.train.Saver(tf.global_variables(), max_to_keep=FLAGS.num_checkpoints)
 
     def restore(self):
         """
@@ -181,4 +128,3 @@ class BasicModel():
         """
         This function trains the model.
         """
-

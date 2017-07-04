@@ -1,0 +1,6 @@
+dialoguesys/data/*
+dialoguesys/src/runs/*
+
+__pycache__
+*.pyc
+*.pyo
